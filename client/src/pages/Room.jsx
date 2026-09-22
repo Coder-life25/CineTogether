@@ -4,6 +4,8 @@ import { useRoom } from '../hooks/useRoom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useMediaDevices } from '../hooks/useMediaDevices';
 import { useWebRTC } from '../hooks/useWebRTC';
+import { useScreenShare } from '../hooks/useScreenShare';
+import { useSyncChannel } from '../hooks/useSyncChannel';
 import { useToast } from '../components/ui/Toast';
 import { Spinner } from '../components/ui/Spinner';
 import WaitingRoom from '../components/room/WaitingRoom';
@@ -24,6 +26,8 @@ const Room = () => {
   const [videoSource, setVideoSource] = useState(null);
   const videoSourceRef = useRef(null);
   const joinedRoomRef = useRef(null);
+  const wsRef = useRef(null);
+  const isSharingRef = useRef(false);
   videoSourceRef.current = videoSource;
 
   useEffect(() => {
@@ -52,14 +56,33 @@ const Room = () => {
 
   const { ws, isConnected } = useWebSocket(roomId, participantId);
   const { localStream, isCameraOn, isMicOn, toggleCamera, toggleMic } = useMediaDevices();
-  const { remoteStream, connectionState, dataChannels } = useWebRTC({
+  const { remoteStream, remoteScreenStream, connectionState, dataChannels, attachScreenStream } = useWebRTC({
     ws, isConnected, localStream, roomId, participantId, peerId
   });
 
+  wsRef.current = ws;
+
+  // Playback control rides the peer connection when it is up and the signaling socket when it
+  // isn't, so a pair whose P2P link never forms still stays in step.
+  const syncChannel = useSyncChannel(dataChannels.control, ws);
+
   const changeVideo = useCallback((source) => {
     setVideoSource(source);
-    if (ws) ws.send('video_change', { source });
-  }, [ws]);
+    if (wsRef.current) wsRef.current.send('video_change', { source: source || null });
+  }, []);
+
+  const screenShare = useScreenShare({
+    onStarted: (stream) => {
+      attachScreenStream(stream);
+      changeVideo({ type: 'screen' });
+    },
+    onStopped: () => {
+      attachScreenStream(null);
+      if (videoSourceRef.current && videoSourceRef.current.type === 'screen') changeVideo(null);
+    }
+  });
+
+  isSharingRef.current = screenShare.isSharing;
 
   useEffect(() => {
     if (!ws) return;
@@ -76,9 +99,13 @@ const Room = () => {
         setPeerId(null);
         setStatus('waiting');
         addToast('Partner left the room', 'warning');
+        // Their screen went with them; there is nothing left to show.
+        if (videoSourceRef.current && videoSourceRef.current.type === 'screen' && !isSharingRef.current) {
+          setVideoSource(null);
+        }
       }),
       ws.onMessage('video_change', (data) => {
-        if (data && data.source) setVideoSource(data.source);
+        if (data) setVideoSource(data.source || null);
       }),
       ws.onMessage('room_closed', () => {
         setStatus('closed');
@@ -127,8 +154,13 @@ const Room = () => {
           localStream={localStream}
           remoteStream={remoteStream}
           dataChannels={dataChannels}
+          syncChannel={syncChannel}
           connectionState={connectionState}
           mediaState={{ isCameraOn, isMicOn, toggleCamera, toggleMic }}
+          screenShare={{
+            ...screenShare,
+            stream: screenShare.isSharing ? screenShare.screenStream : remoteScreenStream
+          }}
         />
       )}
     </>

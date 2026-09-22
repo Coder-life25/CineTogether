@@ -11,6 +11,23 @@ const INSTAGRAM_HOSTS = new Set(['instagram.com', 'www.instagram.com', 'm.instag
 const INSTAGRAM_MEDIA_KINDS = new Set(['p', 'reel', 'reels', 'tv']);
 const INSTAGRAM_SHORTCODE_RE = /^[A-Za-z0-9_-]{5,20}$/;
 
+// Streaming sites serve a whole player page and refuse to be framed (X-Frame-Options, or a CSP
+// frame-ancestors rule), and several of them wrap the video in DRM on top of that. There is no
+// link we can turn these into - the way to watch one together is to share the tab it plays in.
+const EMBED_BLOCKED_HOSTS = [
+  'netmirror.center',
+  'netfree.cc',
+  'netflix.com',
+  'hotstar.com',
+  'primevideo.com',
+  'jiocinema.com',
+  'zee5.com',
+  'sonyliv.com',
+  'disneyplus.com',
+  'hulu.com',
+  'max.com'
+];
+
 export const normalizeUrl = (raw) => {
   if (!raw || typeof raw !== 'string') return null;
   const trimmed = raw.trim();
@@ -24,6 +41,15 @@ export const normalizeUrl = (raw) => {
 };
 
 export const isValidUrl = (url) => normalizeUrl(url) !== null;
+
+// The host if this is a page we know can't be embedded, null otherwise.
+export const embedBlockedHost = (raw) => {
+  const parsed = normalizeUrl(raw);
+  if (!parsed) return null;
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+  const match = EMBED_BLOCKED_HOSTS.find(blocked => host === blocked || host.endsWith(`.${blocked}`));
+  return match ? host : null;
+};
 
 export const isDirectVideoUrl = (url) => {
   const parsed = normalizeUrl(url);
@@ -117,7 +143,8 @@ export const SOURCE_LABELS = {
   facebook: 'Facebook',
   instagram: 'Instagram',
   direct: 'Direct video',
-  r2: 'Uploaded video'
+  r2: 'Uploaded video',
+  screen: 'Shared screen'
 };
 
 export const detectVideoSource = (url) => {

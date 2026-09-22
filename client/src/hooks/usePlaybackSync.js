@@ -1,10 +1,12 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { PlaybackSyncEngine } from '../lib/playbackSync';
 
-// Bridges a player adapter with the partner over the "control" data channel.
+// Bridges a player adapter with the partner over the sync channel (peer-to-peer when the data
+// channel is up, relayed through the signaling socket when it isn't).
 export const usePlaybackSync = (controlChannel, adapter) => {
   const engineRef = useRef(null);
   const [playBlocked, setPlayBlocked] = useState(false);
+  const [autoMuted, setAutoMuted] = useState(false);
 
   useEffect(() => {
     if (!adapter || !controlChannel) return;
@@ -12,7 +14,7 @@ export const usePlaybackSync = (controlChannel, adapter) => {
 
     const engine = new PlaybackSyncEngine({
       onSeek: (pos) => adapter.seekTo(pos),
-      onPlay: () => adapter.play(),
+      onPlay: () => adapter.play({ fromPartner: true }),
       onPause: () => adapter.pause(),
       getPosition: () => adapter.getCurrentTime(),
       isPlaying: () => adapter.isPlaying(),
@@ -44,6 +46,16 @@ export const usePlaybackSync = (controlChannel, adapter) => {
     };
   }, [adapter, controlChannel]);
 
+  // The player starts muted when the browser refuses audible autoplay, so playback still follows
+  // the partner; the UI offers a tap that brings the sound back.
+  useEffect(() => {
+    if (!adapter || typeof adapter.onAutoMute !== 'function') {
+      setAutoMuted(false);
+      return;
+    }
+    return adapter.onAutoMute(setAutoMuted);
+  }, [adapter]);
+
   const emit = useCallback((event) => {
     if (event && controlChannel) controlChannel.send({ type: 'sync_event', payload: event });
   }, [controlChannel]);
@@ -67,5 +79,10 @@ export const usePlaybackSync = (controlChannel, adapter) => {
     if (engineRef.current) engineRef.current.resume();
   }, []);
 
-  return { handlePlay, handlePause, handleSeek, playBlocked, resumePlayback };
+  // Same: unmuting without a gesture makes Safari pause the video again.
+  const unmute = useCallback(() => {
+    if (adapter && typeof adapter.unmute === 'function') adapter.unmute();
+  }, [adapter]);
+
+  return { handlePlay, handlePause, handleSeek, playBlocked, resumePlayback, autoMuted, unmute };
 };

@@ -85,6 +85,10 @@ export class WebSocketClient {
     }, delay);
   }
 
+  isOpen() {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN;
+  }
+
   send(type, payload) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type, payload }));

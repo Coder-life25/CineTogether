@@ -8,10 +8,10 @@ import ChatDrawer from '../chat/ChatDrawer';
 import ReactionBar from '../reactions/ReactionBar';
 import ConnectionIndicator from './ConnectionIndicator';
 import { Button } from '../ui/Button';
-import { LogOut, Film, WifiOff } from 'lucide-react';
+import { LogOut, Film, WifiOff, MonitorUp, MonitorOff } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const WatchRoom = ({ roomId, partnerPresent = true, videoSource, onVideoChange, localStream, remoteStream, dataChannels, connectionState, mediaState }) => {
+const WatchRoom = ({ roomId, partnerPresent = true, videoSource, onVideoChange, localStream, remoteStream, dataChannels, syncChannel, connectionState, mediaState, screenShare }) => {
   const [showPicker, setShowPicker] = useState(!videoSource);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const navigate = useNavigate();
@@ -24,6 +24,14 @@ const WatchRoom = ({ roomId, partnerPresent = true, videoSource, onVideoChange, 
   const handleSourceSelect = (source) => {
     onVideoChange(source);
     setShowPicker(false);
+  };
+
+  // The share itself announces the new source once the browser hands us the stream, so this
+  // only has to get the picker out of the way.
+  const handleShareScreen = async () => {
+    if (!screenShare) return;
+    const stream = await screenShare.start();
+    if (stream) setShowPicker(false);
   };
 
   const handleLeave = () => {
@@ -56,7 +64,8 @@ const WatchRoom = ({ roomId, partnerPresent = true, videoSource, onVideoChange, 
           {videoSource ? (
             <VideoPlayer 
               source={videoSource} 
-              controlChannel={dataChannels.control}
+              controlChannel={syncChannel}
+              screenShare={screenShare}
             />
           ) : (
             <div className="flex flex-col items-center gap-4 text-text-secondary">
@@ -84,9 +93,22 @@ const WatchRoom = ({ roomId, partnerPresent = true, videoSource, onVideoChange, 
 
         {/* Controls Bar */}
         <div className="h-16 flex-shrink-0 bg-secondary border-t border-border flex items-center justify-between px-4 z-30">
-          <Button variant="secondary" size="sm" onClick={() => setShowPicker(true)}>
-            Change Video
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setShowPicker(true)}>
+              Change Video
+            </Button>
+            {screenShare && screenShare.isSupported && (
+              <Button
+                variant={screenShare.isSharing ? 'primary' : 'secondary'}
+                size="sm"
+                className="hidden sm:inline-flex"
+                onClick={screenShare.isSharing ? screenShare.stop : screenShare.start}
+                icon={screenShare.isSharing ? MonitorOff : MonitorUp}
+              >
+                {screenShare.isSharing ? 'Stop sharing' : 'Share screen'}
+              </Button>
+            )}
+          </div>
           {/* Lives in the bar (not over the player) so it never covers the video's own controls */}
           <div className="relative hidden sm:block">
             <ReactionBar reactionsChannel={dataChannels.reactions} />
@@ -115,6 +137,8 @@ const WatchRoom = ({ roomId, partnerPresent = true, videoSource, onVideoChange, 
           isOpen={showPicker} 
           onClose={() => videoSource && setShowPicker(false)} 
           onSelect={handleSourceSelect} 
+          screenShare={screenShare}
+          onShareScreen={handleShareScreen}
         />
       )}
     </div>

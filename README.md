@@ -9,7 +9,8 @@ CineTogether is a private two-person synchronized watch-together web application
 - 🔒 **Private Rooms** — Exactly two participants per room, no authentication needed
 - 📹 **Video Calls** — See and hear each other via WebRTC
 - 💬 **Real-time Chat** — Chat via WebRTC DataChannel (never stored on server)
-- 🎬 **Synchronized Playback** — Play, pause, and seek stay in sync for YouTube, direct files, and uploads
+- 🎬 **Synchronized Playback** — Play, pause, and seek stay in sync for YouTube, direct files, and uploads. When one of you presses play the other follows on its own; if the browser won't start audible playback without a click, the video starts muted and in sync and offers a one-tap "tap for sound"
+- 🖥️ **Screen sharing** — For anything that won't play from a link (streaming sites, DRM, players that only work on their own page): one of you plays it in a tab and shares it. One playback, two viewers, so there is nothing to keep in step
 - 🔗 **One box, any link** — Paste a YouTube, Facebook, Instagram or direct-video (.mp4/.webm) link; the source is auto-detected
 - 📺 **YouTube** — Full two-way sync (play / pause / seek), honours `?t=` start times
 - ▶️ **Direct URLs & uploads** — Any browser-playable video URL, or upload straight to Cloudflare R2 (server never touches the file)
@@ -35,7 +36,11 @@ Browser A ←→ WebRTC P2P ←→ Browser B
 
 **Key principle:** The server never proxies, streams, or stores movie files. Videos are uploaded directly from the browser to R2 and played back directly from R2, and social links play through the platforms' own embeds.
 
-**Supported links:** YouTube (`youtube.com/watch`, `youtu.be`, `/shorts`, `/live`, `/embed`), Facebook (`/watch`, `/<page>/videos/<id>`, `/reel`, `fb.watch`, `/share/v|r`), Instagram (`/p`, `/reel`, `/reels`, `/tv`), and direct video URLs ending in `.mp4/.webm/.ogg/.mov/.m4v`. Streaming-site pages that forbid embedding (for example `netmirror.center`, which sends `X-Frame-Options: SAMEORIGIN`) can't be played in an embed and are rejected with a clear message.
+**Supported links:** YouTube (`youtube.com/watch`, `youtu.be`, `/shorts`, `/live`, `/embed`), Facebook (`/watch`, `/<page>/videos/<id>`, `/reel`, `fb.watch`, `/share/v|r`), Instagram (`/p`, `/reel`, `/reels`, `/tv`), and direct video URLs ending in `.mp4/.webm/.ogg/.mov/.m4v`.
+
+**Everything else — streaming sites, DRM, players that only load on their own page:** these send `X-Frame-Options` or a CSP `frame-ancestors` rule precisely so they can't be loaded inside another site (`netmirror.center` is one), and many wrap the video in DRM as well. There is no link that makes them playable here, so the picker recognises them and points at **Share screen** instead: whoever has it open plays it in their own tab, the tab goes over the peer connection, and both of you watch that one playback. Pick the *Chrome Tab* option and tick *Also share tab audio* or your partner watches in silence.
+
+**Playback sync transport:** control messages go over the WebRTC data channel and fall back to the signaling socket when the peer connection never comes up — with STUN-only ICE that happens on a fair number of mobile and carrier NATs, and without the fallback a pair in that situation has no sync at all. Only play/pause/seek take the fallback path; chat and reactions stay strictly peer-to-peer and never reach the server.
 
 ## Prerequisites
 
@@ -127,7 +132,8 @@ Open `http://localhost:5173` in two browser tabs to test.
 | `ice-candidate` | Client → Server → Client | ICE candidate exchange |
 | `participant-joined` | Server → Client | Partner connected |
 | `participant-left` | Server → Client | Partner disconnected |
-| `video-changed` | Server → Client | Video source changed |
+| `video-changed` | Server → Client | Video source changed (`source: null` clears it, e.g. a finished screen share) |
+| `sync` | Client → Server → Client | Play/pause/seek relay, used when the data channel is unavailable |
 
 ## Video Cleanup
 
@@ -140,7 +146,7 @@ Open `http://localhost:5173` in two browser tabs to test.
 **Frontend:** React, Vite, Tailwind CSS, Framer Motion, Lucide Icons  
 **Backend:** Node.js, Express, WebSocket (ws)  
 **Database:** MongoDB Atlas  
-**Realtime:** WebRTC (camera, mic, chat, sync)  
+**Realtime:** WebRTC (camera, mic, screen share, chat, sync)  
 **Storage:** Cloudflare R2
 
 ## License

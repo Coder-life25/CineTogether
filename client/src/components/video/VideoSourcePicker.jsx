@@ -2,8 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { parseVideoUrl, SOURCE_LABELS } from '../../lib/urlUtils';
-import { Upload, Youtube, Link as LinkIcon, Facebook, Instagram, Film, AlertCircle } from 'lucide-react';
+import { parseVideoUrl, SOURCE_LABELS, embedBlockedHost } from '../../lib/urlUtils';
+import { Upload, Youtube, Link as LinkIcon, Facebook, Instagram, Film, AlertCircle, MonitorUp, Volume2 } from 'lucide-react';
 import { useR2Upload } from '../../hooks/useR2Upload';
 import UploadProgress from './UploadProgress';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,7 +17,7 @@ const SOURCE_ICONS = {
 
 const UNSUPPORTED_MESSAGE = "This link can't be played here. Paste a YouTube, Facebook, Instagram or direct video (.mp4 / .webm) link.";
 
-const VideoSourcePicker = ({ roomId, isOpen, onClose, onSelect }) => {
+const VideoSourcePicker = ({ roomId, isOpen, onClose, onSelect, screenShare, onShareScreen }) => {
   const [activeTab, setActiveTab] = useState('link');
   const [url, setUrl] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -26,12 +26,15 @@ const VideoSourcePicker = ({ roomId, isOpen, onClose, onSelect }) => {
   const { startUpload, progress, isUploading, error, abort } = useR2Upload();
 
   const detected = useMemo(() => parseVideoUrl(url), [url]);
-  const showUnsupported = submitted && url.trim() && !detected;
+  const blockedHost = useMemo(() => (detected ? null : embedBlockedHost(url)), [url, detected]);
+  const showUnsupported = submitted && url.trim() && !detected && !blockedHost;
+  const canShareScreen = !!(screenShare && screenShare.isSupported && onShareScreen);
 
   const handleUrlSubmit = (e) => {
     e.preventDefault();
     setSubmitted(true);
     if (detected) onSelect(detected);
+    else if (blockedHost) setActiveTab('screen');
   };
 
   const handleUpload = async () => {
@@ -46,7 +49,8 @@ const VideoSourcePicker = ({ roomId, isOpen, onClose, onSelect }) => {
 
   const tabs = [
     { id: 'link', icon: LinkIcon, label: 'Paste link' },
-    { id: 'upload', icon: Upload, label: 'Upload' }
+    { id: 'upload', icon: Upload, label: 'Upload' },
+    { id: 'screen', icon: MonitorUp, label: 'Share screen' }
   ];
 
   const DetectedIcon = detected ? SOURCE_ICONS[detected.type] : null;
@@ -98,13 +102,36 @@ const VideoSourcePicker = ({ roomId, isOpen, onClose, onSelect }) => {
                     {(detected.type === 'facebook' || detected.type === 'instagram') && ' · plays on both sides, press play together'}
                   </span>
                 )}
-                {!detected && url.trim() && !submitted && (
+                {!detected && !blockedHost && url.trim() && !submitted && (
                   <span className="inline-flex items-center gap-2 text-text-secondary">
                     <AlertCircle className="w-4 h-4" />
                     Not a supported link yet
                   </span>
                 )}
               </div>
+
+              {/* Streaming sites refuse to load inside another page, so a link is a dead end here.
+                  Sharing the tab plays it once, on one machine, and both of you watch that. */}
+              {blockedHost && (
+                <div className="rounded-lg border border-border bg-secondary/60 p-4 space-y-3">
+                  <p className="text-sm text-text-primary">
+                    <span className="font-medium">{blockedHost}</span> blocks playback inside other
+                    sites, so it can&apos;t be opened from a link here.
+                  </p>
+                  <p className="text-sm text-text-secondary">
+                    Share your screen instead: play it in your own tab and your partner watches
+                    along — one playback, so you&apos;re in sync with nothing to press.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    icon={MonitorUp}
+                    onClick={() => setActiveTab('screen')}
+                  >
+                    Share screen instead
+                  </Button>
+                </div>
+              )}
 
               <Button type="submit" className="w-full" disabled={!url.trim()}>Play Video</Button>
 
@@ -143,6 +170,48 @@ const VideoSourcePicker = ({ roomId, isOpen, onClose, onSelect }) => {
                   {error && <p className="text-accent text-sm">{error}</p>}
                 </>
               )}
+            </div>
+          )}
+
+          {activeTab === 'screen' && (
+            <div className="space-y-4">
+              <div className="border border-border rounded-xl p-6 text-center bg-secondary/50">
+                <MonitorUp className="w-8 h-8 text-accent mx-auto mb-3" />
+                <p className="text-text-primary font-medium mb-1">Share the tab you&apos;re watching in</p>
+                <p className="text-sm text-text-secondary">
+                  For anything that won&apos;t play from a link — a streaming site, a service with
+                  DRM, a player that only works on its own page. It runs on your machine and your
+                  partner sees exactly what you see.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-2 text-sm text-text-secondary">
+                <Volume2 className="w-4 h-4 mt-0.5 flex-shrink-0 text-accent" />
+                <span>
+                  Pick the <span className="text-text-primary">Chrome Tab</span> the movie is in and
+                  turn on <span className="text-text-primary">Also share tab audio</span>, otherwise
+                  they&apos;ll watch it silently.
+                </span>
+              </div>
+
+              {canShareScreen ? (
+                <Button className="w-full" icon={MonitorUp} onClick={onShareScreen}>
+                  Share my screen
+                </Button>
+              ) : (
+                <p className="text-accent text-sm">
+                  This browser can&apos;t share a screen. Use Chrome, Edge or Firefox on a computer —
+                  iPhones and iPads don&apos;t offer it at all.
+                </p>
+              )}
+              {screenShare && screenShare.error && (
+                <p className="text-accent text-sm">{screenShare.error}</p>
+              )}
+
+              <p className="text-xs text-text-secondary">
+                One playback, two viewers — there&apos;s no second player to keep in step, so neither
+                of you has to press play.
+              </p>
             </div>
           )}
         </motion.div>

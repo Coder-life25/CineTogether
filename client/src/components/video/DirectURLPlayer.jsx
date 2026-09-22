@@ -4,6 +4,7 @@ import { HTML5Adapter } from '../../lib/videoSourceAdapter';
 import { usePlaybackSync } from '../../hooks/usePlaybackSync';
 import VideoControls from './VideoControls';
 import ResumeOverlay from './ResumeOverlay';
+import UnmuteChip from './UnmuteChip';
 
 const fileName = (url) => {
   try {
@@ -31,7 +32,8 @@ const DirectURLPlayer = ({ url, controlChannel, title }) => {
     };
   }, [url]);
 
-  const { handlePlay, handlePause, handleSeek, playBlocked, resumePlayback } = usePlaybackSync(controlChannel, adapter);
+  const { handlePlay, handlePause, handleSeek, playBlocked, resumePlayback, autoMuted, unmute } =
+    usePlaybackSync(controlChannel, adapter);
 
   return (
     <div className="relative w-full h-full bg-black flex items-center justify-center group">
@@ -55,6 +57,7 @@ const DirectURLPlayer = ({ url, controlChannel, title }) => {
       ) : adapter && (
         <VideoControls adapter={adapter} title={title || fileName(url)} />
       )}
+      {!error && autoMuted && <UnmuteChip onUnmute={unmute} />}
       {!error && playBlocked && <ResumeOverlay onResume={resumePlayback} />}
     </div>
   );

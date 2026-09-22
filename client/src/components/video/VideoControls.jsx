@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Play, Pause, Maximize, Volume2 } from 'lucide-react';
+import { Play, Pause, Maximize, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const formatTime = (seconds) => {
@@ -15,6 +15,7 @@ const VideoControls = ({ adapter, title }) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [showControls, setShowControls] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
 
   useEffect(() => {
     if (!adapter) return;
@@ -28,6 +29,9 @@ const VideoControls = ({ adapter, title }) => {
       if (duration === 0 && adapter.getDuration()) {
         setDuration(adapter.getDuration());
       }
+      // The player mutes itself when the browser blocks audible autoplay, so the icon can't just
+      // follow this button's own clicks.
+      if (adapter.isMuted) setIsMuted(adapter.isMuted());
     });
 
     let timeout;
@@ -47,6 +51,13 @@ const VideoControls = ({ adapter, title }) => {
   const togglePlay = () => {
     if (isPlaying) adapter.pause();
     else adapter.play();
+  };
+
+  const toggleMute = () => {
+    if (!adapter.setMuted) return;
+    const next = !adapter.isMuted();
+    adapter.setMuted(next);
+    setIsMuted(next);
   };
 
   const handleSeek = (e) => {
@@ -95,8 +106,12 @@ const VideoControls = ({ adapter, title }) => {
               </div>
               
               <div className="flex items-center gap-4">
-                <button className="text-white hover:text-accent transition-colors">
-                  <Volume2 className="w-5 h-5" />
+                <button
+                  onClick={toggleMute}
+                  aria-label={isMuted ? 'Unmute' : 'Mute'}
+                  className={`transition-colors ${isMuted ? 'text-accent' : 'text-white hover:text-accent'}`}
+                >
+                  {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                 </button>
                 <button 
                   onClick={() => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()} 

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { api } from '../services/api';
+import { api, setParticipantId as setApiParticipantId } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 export const useRoom = () => {
@@ -23,6 +23,7 @@ export const useRoom = () => {
     try {
       const res = await api.joinRoom(id);
       setRoomId(id);
+      setApiParticipantId(res.participantId); // every video/upload call is authorised with it
       setParticipantId(res.participantId);
       setRoomState(res.room);
       return res;
@@ -35,6 +36,7 @@ export const useRoom = () => {
   const leaveRoom = useCallback(() => {
     setRoomState(null);
     setRoomId(null);
+    setApiParticipantId(null);
     setParticipantId(null);
     navigate('/');
   }, [navigate]);

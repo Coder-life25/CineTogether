@@ -4,6 +4,7 @@ import { usePlaybackSync } from '../../hooks/usePlaybackSync';
 import { AlertCircle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import ResumeOverlay from './ResumeOverlay';
+import UnmuteChip from './UnmuteChip';
 
 let apiPromise = null;
 
@@ -38,7 +39,8 @@ const YouTubePlayer = ({ videoId, start = 0, controlChannel }) => {
   const [adapter, setAdapter] = useState(null);
   const [error, setError] = useState(null);
 
-  const { handlePlay, handlePause, handleSeek, playBlocked, resumePlayback } = usePlaybackSync(controlChannel, adapter);
+  const { handlePlay, handlePause, handleSeek, playBlocked, resumePlayback, autoMuted, unmute } =
+    usePlaybackSync(controlChannel, adapter);
   const syncRef = useRef({ handlePlay, handlePause, handleSeek });
   syncRef.current = { handlePlay, handlePause, handleSeek };
 
@@ -116,6 +118,7 @@ const YouTubePlayer = ({ videoId, start = 0, controlChannel }) => {
   return (
     <div className="w-full h-full bg-black relative">
       <div ref={containerRef} className="w-full h-full" />
+      {autoMuted && <UnmuteChip onUnmute={unmute} />}
       {playBlocked && <ResumeOverlay onResume={resumePlayback} />}
     </div>
   );

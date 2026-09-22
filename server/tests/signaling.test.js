@@ -56,3 +56,36 @@ describe('video_change validation', () => {
     expect(wrap({ type: 'facebook', url: 'https://www.facebook.com/x' })).toThrow('Invalid embed url');
   });
 });
+
+describe('screen share and cleared sources', () => {
+  const wrap = (source) => () => validateMessage({ type: 'video_change', payload: { source } });
+
+  it('accepts a screen source, which carries no url of its own', () => {
+    expect(wrap({ type: 'screen' })).not.toThrow();
+  });
+
+  it('accepts a null source, which clears the room video when a share ends', () => {
+    expect(wrap(null)).not.toThrow();
+  });
+
+  it('still rejects video_change with no source field at all', () => {
+    expect(() => validateMessage({ type: 'video_change', payload: {} })).toThrow('Missing source');
+    expect(() => validateMessage({ type: 'video_change' })).toThrow('Missing source');
+  });
+});
+
+describe('sync relay validation', () => {
+  const wrap = (data) => () => validateMessage({ type: 'sync', payload: { data } });
+
+  it('accepts the three playback control messages', () => {
+    expect(wrap({ type: 'sync_event', payload: { type: 'play', position: 12 } })).not.toThrow();
+    expect(wrap({ type: 'request_sync_state' })).not.toThrow();
+    expect(wrap({ type: 'sync_state', payload: { position: 12, playing: true } })).not.toThrow();
+  });
+
+  it('rejects anything else riding the relay', () => {
+    expect(wrap({ type: 'chat_message', payload: { text: 'hi' } })).toThrow('Invalid sync payload');
+    expect(wrap(null)).toThrow('Invalid sync payload');
+    expect(() => validateMessage({ type: 'sync' })).toThrow('Invalid sync payload');
+  });
+});

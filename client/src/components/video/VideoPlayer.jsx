@@ -3,12 +3,21 @@ import R2Player from './R2Player';
 import YouTubePlayer from './YouTubePlayer';
 import DirectURLPlayer from './DirectURLPlayer';
 import EmbedPlayer from './EmbedPlayer';
+import ScreenSharePlayer from './ScreenSharePlayer';
 import { parseVideoUrl } from '../../lib/urlUtils';
 
-const VideoPlayer = ({ source, controlChannel }) => {
+const VideoPlayer = ({ source, controlChannel, screenShare }) => {
   if (!source) return null;
 
   switch (source.type) {
+    case 'screen':
+      return (
+        <ScreenSharePlayer
+          stream={screenShare && screenShare.stream}
+          isSharer={!!(screenShare && screenShare.isSharing)}
+          onStop={screenShare && screenShare.stop}
+        />
+      );
     case 'r2':
       return <R2Player url={source.url} controlChannel={controlChannel} />;
     case 'youtube':
@@ -21,7 +30,9 @@ const VideoPlayer = ({ source, controlChannel }) => {
     case 'embed': {
       // Older clients sent the raw page URL; resolve it the same way the picker does now
       const resolved = parseVideoUrl(source.url);
-      return resolved ? <VideoPlayer source={resolved} controlChannel={controlChannel} /> : <Unsupported />;
+      return resolved
+        ? <VideoPlayer source={resolved} controlChannel={controlChannel} screenShare={screenShare} />
+        : <Unsupported />;
     }
     default:
       return <Unsupported />;

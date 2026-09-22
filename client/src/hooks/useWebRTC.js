@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { ICE_SERVERS } from '../lib/constants';
 
 const MAX_QUEUED_MESSAGES = 50;
@@ -57,6 +57,18 @@ const CHANNELS = [
 ];
 const SIGNALING_TYPES = ['webrtc_offer', 'webrtc_answer', 'webrtc_ice_candidate'];
 
+// Four media slots are negotiated once, up front, always in this order: the m-lines an offer
+// creates keep it, so both sides can address a slot by position without renegotiating. Camera and
+// screen get their own slots rather than sharing one, so a screen share never costs you the view
+// of each other's faces.
+const SLOTS = [
+  ['micAudio', 'audio'],
+  ['cameraVideo', 'video'],
+  ['screenVideo', 'video'],
+  ['screenAudio', 'audio']
+];
+const SCREEN_SLOTS = new Set(['screenVideo', 'screenAudio']);
+
 // One RTCPeerConnection per partner session. `peerId` is null while we're alone. The connection
 // is only built over an open socket: a socket drop tears it down and the partner rebuilds too.
 export const useWebRTC = ({ ws, isConnected, localStream, roomId, participantId, peerId }) => {
@@ -64,8 +76,11 @@ export const useWebRTC = ({ ws, isConnected, localStream, roomId, participantId,
   const signalingRef = useRef(null);   // handlers of the live peer connection
   const pendingRef = useRef([]);       // signaling that arrived before the peer connection existed
   const attachTracksRef = useRef(null); // slots local camera/mic into the live connection
+  const attachScreenRef = useRef(null); // same for the shared screen
   const localStreamRef = useRef(localStream);
+  const screenStreamRef = useRef(null); // survives a peer connection rebuild
   const [remoteStream, setRemoteStream] = useState(null);
+  const [remoteScreenStream, setRemoteScreenStream] = useState(null);
   const [connectionState, setConnectionState] = useState('new');
   const [dataChannels, setDataChannels] = useState({});
 
@@ -108,44 +123,71 @@ export const useWebRTC = ({ ws, isConnected, localStream, roomId, participantId,
       if (!closed) setConnectionState(pc.connectionState);
     };
 
-    // Audio/video slots are negotiated once, up front: the impolite side offers two sendrecv
-    // transceivers and the polite side answers on the ones that offer creates. Camera and mic
-    // tracks are dropped into them with replaceTrack() whenever they become available, which
-    // needs no renegotiation - simultaneous renegotiation from both sides used to leave ICE stuck.
-    const remote = new MediaStream();
-    pc.ontrack = ({ track }) => {
-      remote.addTrack(track);
-      if (!closed) setRemoteStream(remote);
-    };
-    let transceivers = polite ? null : {
-      audio: pc.addTransceiver('audio', { direction: 'sendrecv' }),
-      video: pc.addTransceiver('video', { direction: 'sendrecv' })
-    };
+    // The impolite side offers every slot as sendrecv; the polite side answers on the ones that
+    // offer created. Tracks are dropped in with replaceTrack(), which needs no renegotiation -
+    // simultaneous renegotiation from both sides used to leave ICE stuck.
+    const remoteCamera = new MediaStream();
+    const remoteScreen = new MediaStream();
+    let transceivers = polite ? null : SLOTS.reduce((slots, [name, kind]) => {
+      slots[name] = pc.addTransceiver(kind, { direction: 'sendrecv' });
+      return slots;
+    }, {});
     const resolveTransceivers = () => {
       if (transceivers) return transceivers;
-      const byKind = {};
-      pc.getTransceivers().forEach((transceiver) => {
-        const kind = transceiver.receiver.track.kind;
-        if (!byKind[kind]) byKind[kind] = transceiver;
-      });
-      if (!byKind.audio || !byKind.video) return null;
-      byKind.audio.direction = 'sendrecv';
-      byKind.video.direction = 'sendrecv';
-      transceivers = byKind;
+      // Created by the remote offer, and getTransceivers() hands them back in m-line order.
+      const all = pc.getTransceivers();
+      if (all.length < SLOTS.length) return null;
+      const resolved = {};
+      for (let i = 0; i < SLOTS.length; i++) {
+        const [name, kind] = SLOTS[i];
+        if (all[i].receiver.track.kind !== kind) return null; // not the layout we negotiate
+        all[i].direction = 'sendrecv';
+        resolved[name] = all[i];
+      }
+      transceivers = resolved;
       return transceivers;
     };
-    const attachTracks = (stream) => {
-      if (!stream || pc.signalingState === 'closed') return;
+
+    pc.ontrack = ({ track, transceiver }) => {
+      const slots = resolveTransceivers();
+      const slotName = slots && Object.keys(slots).find(name => slots[name] === transceiver);
+      const isScreen = SCREEN_SLOTS.has(slotName);
+      const target = isScreen ? remoteScreen : remoteCamera;
+      if (!target.getTracks().includes(track)) target.addTrack(track);
+      if (closed) return;
+      // Stable stream objects: React re-renders when one first appears, and later tracks land in
+      // the same MediaStream, which the <video> already follows. Swapping in a new object here
+      // would reassign srcObject and flash the picture.
+      if (isScreen) setRemoteScreenStream(remoteScreen);
+      else setRemoteStream(remoteCamera);
+    };
+
+    const attachToSlots = (stream, slotNames) => {
+      if (pc.signalingState === 'closed') return;
       const slots = resolveTransceivers();
       if (!slots) return; // polite side: the first remote offer creates the slots
-      ['audio', 'video'].forEach((kind) => {
-        const track = kind === 'audio' ? stream.getAudioTracks()[0] : stream.getVideoTracks()[0];
-        const sender = slots[kind].sender;
-        if (track && sender.track !== track) sender.replaceTrack(track).catch(console.error);
+      slotNames.forEach(([name, kind]) => {
+        const track = stream
+          ? (kind === 'audio' ? stream.getAudioTracks()[0] : stream.getVideoTracks()[0]) || null
+          : null;
+        const sender = slots[name].sender;
+        if (sender.track !== track) sender.replaceTrack(track).catch(console.error);
       });
     };
+
+    const attachTracks = (stream) => {
+      if (!stream) return;
+      attachToSlots(stream, [['micAudio', 'audio'], ['cameraVideo', 'video']]);
+    };
+    // A null stream clears the slots, which is how the partner's screen goes dark when we stop.
+    const attachScreen = (stream) => {
+      attachToSlots(stream, [['screenVideo', 'video'], ['screenAudio', 'audio']]);
+    };
+
     attachTracksRef.current = attachTracks;
+    attachScreenRef.current = attachScreen;
     attachTracks(localStreamRef.current);
+    if (screenStreamRef.current) attachScreen(screenStreamRef.current);
 
     pc.onicecandidate = ({ candidate }) => {
       if (candidate) ws.send('webrtc_ice_candidate', { candidate: candidate.toJSON() });
@@ -179,6 +221,7 @@ export const useWebRTC = ({ ws, isConnected, localStream, roomId, participantId,
         try {
           await pc.setRemoteDescription(sdp); // polite side rolls back its own offer implicitly
           attachTracks(localStreamRef.current); // answer with our camera/mic on the offered slots
+          if (screenStreamRef.current) attachScreen(screenStreamRef.current);
           await pc.setLocalDescription();
           ws.send('webrtc_answer', { sdp: pc.localDescription.toJSON() });
         } catch (err) {
@@ -215,8 +258,10 @@ export const useWebRTC = ({ ws, isConnected, localStream, roomId, participantId,
       pc.close();
       if (pcRef.current === pc) pcRef.current = null;
       attachTracksRef.current = null;
+      attachScreenRef.current = null;
       setDataChannels({});
       setRemoteStream(null);
+      setRemoteScreenStream(null);
       setConnectionState('closed');
     };
   }, [ws, isConnected, roomId, participantId, peerId]);
@@ -226,5 +271,11 @@ export const useWebRTC = ({ ws, isConnected, localStream, roomId, participantId,
     if (attachTracksRef.current && localStream) attachTracksRef.current(localStream);
   }, [localStream, dataChannels]);
 
-  return { remoteStream, connectionState, dataChannels };
+  // Stable across renders so the room can start and stop a share without rebuilding anything.
+  const attachScreenStream = useCallback((stream) => {
+    screenStreamRef.current = stream || null;
+    if (attachScreenRef.current) attachScreenRef.current(stream || null);
+  }, []);
+
+  return { remoteStream, remoteScreenStream, connectionState, dataChannels, attachScreenStream };
 };
